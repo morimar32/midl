@@ -1,0 +1,12 @@
+# Main model configuration
+model_path: "llama-3.2-3b-instruct-q8_0.gguf"  # TODO: Specify the path to your main model file
+n_ctx: 8192                           # Example: Maximum context size (e.g., 2048, 4096)
+n_gpu_layers: 40                      # Example: Number of layers to offload to GPU (-1 for all, 0 for none)
+max_tokens: 32768                       # Example: Maximum tokens to generate per request
+temperature: 0.6                      # Example: Sampling temperature (e.g., 0.7, 0.8)
+top_p: 0.95                           # Example: Nucleus sampling threshold (e.g., 0.9, 0.95)
+
+# Optional draft model configuration (leave blank or comment out if not used)
+draft_model_path: ""                  # Path to your draft model .gguf file (optional)
+draft_n_ctx: ""                       # Maximum context size for draft model (optional)
+draft_n_gpu_layers: ""                # Number of layers to offload to GPU for draft model (optional)
