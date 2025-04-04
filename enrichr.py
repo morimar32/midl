@@ -1,47 +1,36 @@
 from typing import List
 from pydantic import BaseModel
-from llama_cpp import Llama
-
-# Global model instance
-llm = None
+from model import is_initialized, get_llm
 
 class ChatMessageInput(BaseModel):
     role: str
     content: str
 
-def initialize(config: dict) -> None:
-    """Initialize the LLM model with configuration."""
-    global llm
-    llm = Llama(
-        model_path=config['model_path'],
-        n_ctx=config['n_ctx'],
-        n_gpu_layers=config['n_gpu_layers']
-    )
 
-def process_request(messages: List[ChatMessageInput], config: dict = None) -> str:
+def enrich_request(messages: List[ChatMessageInput], config: dict = None) -> tuple[List['ChatMessageInput'], str]:
     """Process a chat request using the initialized model."""
-    if llm is None:
-        raise RuntimeError("Model not initialized. Call initialize() first.") 
-
+    if not is_initialized():
+        raise RuntimeError("Model not initialized. Call initialize() first.")
+    
     # Format messages for the model
     formatted_messages = [{"role": msg.role, "content": msg.content} for msg in messages[:-1]]
 
-    enriched_content = enrich_request(messages[-1].content, config)
+    enriched_content = _enrich_content(messages[-1].content, config) if len(messages) > 0 else ""
     if not enriched_content.strip():
         print("No enriched content generated. Returning original message.")
-        return "No enriched content generated. Returning original message."
+        return None, "No enriched content generated. Returning original message."
     
     # Generate expert persona based on enriched content
     expert_persona = generate_expert(enriched_content, config)
     if not expert_persona.strip():
         print("No expert persona generated. Returning enriched content.")
-        return "No expert persona generated. Returning enriched content."
+        return None, "No expert persona generated. Returning enriched content."
     
     final_prompt = build_final_prompt(enriched_content, expert_persona)
-    formatted_messages.append({"role": final_prompt, "content": enrich_request})
-    #formatted_messages.append({"role": messages[-1].role, "content": final_prompt})
+    formatted_messages.append({"role": messages[-1].role, "content": final_prompt})
     
     # Get response from model
+    llm = get_llm()
     response = llm.create_chat_completion(
         messages=formatted_messages,
         temperature=config.get('temperature', 0.6) if config else 0.6,
@@ -51,9 +40,10 @@ def process_request(messages: List[ChatMessageInput], config: dict = None) -> st
     
     # Combine expert persona with model response
     model_response = response["choices"][0]["message"]["content"]
-    return model_response
 
-def enrich_request(latest_message: str, config: dict = None) -> str:
+    return formatted_messages, model_response
+
+def _enrich_content(latest_message: str, config: dict = None) -> str:
     """
     Enhance the user's request by generating a refined prompt using the LLM.
     
@@ -64,7 +54,7 @@ def enrich_request(latest_message: str, config: dict = None) -> str:
     Returns:
         The refined prompt extracted from the LLM response between &lt;refined_prompt&gt; tags
     """
-    if llm is None:
+    if not is_initialized():
         raise RuntimeError("Model not initialized. Call initialize() first.")
     
     # Internal prompt template to refine the user's request
@@ -132,6 +122,7 @@ BELOW IS THE SAMPLE PROMPT:
     formatted_prompt = prompt_template.format(user_request=latest_message)
     
     # Get response from model
+    llm = get_llm()
     response = llm.create_chat_completion(
         messages=[{"role": "user", "content": formatted_prompt}],
         temperature=config.get('temperature', 0.6) if config else 0.6,
@@ -178,9 +169,9 @@ def generate_expert(enriched_context: str, config: dict = None) -> str:
     Returns:
         The ideal expert persona extracted from the LLM response
     """
-    if llm is None:
+    if not is_initialized():
         raise RuntimeError("Model not initialized. Call initialize() first.")
-    
+
     # Prompt template to generate expert persona
     prompt_template = """<prompt>
   <task>Analyze the following sample prompt thoughtfully and reflect on its characteristics to determine the best approach for answering it. **Think step by step and do a thorough job!**</task>
@@ -232,6 +223,7 @@ BELOW IS THE SAMPLE PROMPT:
     formatted_prompt = prompt_template.format(context=enriched_context)
     
     # Get response from model
+    llm = get_llm()
     response = llm.create_chat_completion(
         messages=[{"role": "user", "content": formatted_prompt}],
         temperature=config.get('temperature', 0.6) if config else 0.6,

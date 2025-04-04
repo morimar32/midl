@@ -10,7 +10,8 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from enrichr import process_request, initialize
+from enrichr import enrich_request
+from model import initialize
 
 # --- Load Configuration ---
 
@@ -71,8 +72,15 @@ class ChatCompletionResponse(BaseModel):
 app = FastAPI()
 
 # Initialize the model with config
-initialize(config)
 print(f"Initializing model with config: {config}")
+initialize(config)
+
+# Wait for model to fully initialize
+from model import is_initialized
+while not is_initialized():
+    print("Waiting for model initialization to complete...")
+    time.sleep(1)
+print("Model initialization complete")
 
 # Add CORS middleware
 app.add_middleware(
@@ -122,7 +130,26 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
                 
-                response_text = process_request(request.messages, config)
+                try:
+                    formatted_messages, response_text = enrich_request(request.messages, config)
+                except Exception as e:
+                    print(f"Error processing request: {e}")
+                    chunk = {
+                        "id": f"chatcmpl-{uuid.uuid4()}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "default-model-v1",
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "content": f"Error: {str(e)}"
+                            },
+                            "finish_reason": "error"
+                        }]
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
                 # Send the content in a separate chunk
                 chunk["choices"][0]["delta"] = {"content": response_text}
                 yield f"data: {json.dumps(chunk)}\n\n"
@@ -136,9 +163,29 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
             )
         else:
             # Non-streaming response (unchanged)
-            response_text = process_request(request.messages, config)
-            response = {"id": f"chatcmpl-{uuid.uuid4()}", "object": "chat.completion", "created": int(time.time()), "choices": [{"message": {"role": "assistant", "content": response_text}, "index": 0, "finish_reason": "stop"}], "model": "default-model-v1"}
-            return JSONResponse(content=response)
+            try:
+                formatted_messages, response_text = enrich_request(request.messages, config)
+                response = {
+                    "id": f"chatcmpl-{uuid.uuid4()}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": response_text
+                        },
+                        "index": 0,
+                        "finish_reason": "stop"
+                    }],
+                    "model": "default-model-v1"
+                }
+                return JSONResponse(content=response)
+            except Exception as e:
+                print(f"Error processing request: {e}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": str(e)}
+                )
 
     except Exception as e:
         print(f"Error: {e}")
