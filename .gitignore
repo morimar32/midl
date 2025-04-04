@@ -174,4 +174,4 @@ cython_debug/
 .pypirc
 
 # lets skip any LLMs
-.gguf
+*.gguf

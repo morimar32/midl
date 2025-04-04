@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from modl import process_request, initialize
+from enrichr import process_request, initialize
 
 # --- Load Configuration ---
 
