@@ -1,13 +1,9 @@
 from typing import List
-from pydantic import BaseModel
 from model import is_initialized, get_llm
-
-class ChatMessageInput(BaseModel):
-    role: str
-    content: str
+from models import ChatMessageInput
 
 
-def enrich_request(messages: List[ChatMessageInput], config: dict = None) -> tuple[List['ChatMessageInput'], str]:
+def enrich_request(messages: List[ChatMessageInput], config: dict = None) -> tuple[List[ChatMessageInput], str, dict]:
     """Process a chat request using the initialized model."""
     if not is_initialized():
         raise RuntimeError("Model not initialized. Call initialize() first.")
@@ -18,13 +14,13 @@ def enrich_request(messages: List[ChatMessageInput], config: dict = None) -> tup
     enriched_content = _enrich_content(messages[-1].content, config) if len(messages) > 0 else ""
     if not enriched_content.strip():
         print("No enriched content generated. Returning original message.")
-        return None, "No enriched content generated. Returning original message."
+        return None, "No enriched content generated. Returning original message.", {"input_tokens": 0, "output_tokens": 0}
     
     # Generate expert persona based on enriched content
     expert_persona = generate_expert(enriched_content, config)
     if not expert_persona.strip():
         print("No expert persona generated. Returning enriched content.")
-        return None, "No expert persona generated. Returning enriched content."
+        return None, "No expert persona generated. Returning enriched content.", {"input_tokens": 0, "output_tokens": 0}
     
     final_prompt = build_final_prompt(enriched_content, expert_persona)
     formatted_messages.append({"role": messages[-1].role, "content": final_prompt})
@@ -40,8 +36,13 @@ def enrich_request(messages: List[ChatMessageInput], config: dict = None) -> tup
     
     # Combine expert persona with model response
     model_response = response["choices"][0]["message"]["content"]
+    usage = response.get("usage", {"prompt_tokens": 0, "completion_tokens": 0})
+    usage_stats = {
+        "input_tokens": usage.get("prompt_tokens", 0),
+        "output_tokens": usage.get("completion_tokens", 0),
+    }
 
-    return formatted_messages, model_response
+    return formatted_messages, model_response, usage_stats
 
 def _enrich_content(latest_message: str, config: dict = None) -> str:
     """
